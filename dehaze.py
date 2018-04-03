@@ -17,7 +17,7 @@ PATCH_SIZE = 15
 HAZE_WEIGHT = 0.95
 BRIGHTEST_PIXELS_PERCENTAGE = 0.001
 IMG_START = 1
-IMG_END = 3
+IMG_END = 2
 
 
 def dark_channel(input_img, patch_size):
@@ -175,5 +175,3 @@ if __name__ == '__main__':
     cv2.imshow('Recovered Image', recovered_img)
     cv2.imshow('Reference Image', ref_img)
     cv2.waitKey()
-
-

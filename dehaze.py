@@ -139,11 +139,11 @@ if __name__ == '__main__':
     recovered_img = 0
 
     for fn in os.listdir(im_dir):
-        img_read = img_read + 1
-        if img_read < IMG_START:
+        if img_read+1 < IMG_START:
             continue
-        if img_read >= IMG_END:
+        if img_read+1 >= IMG_END:
             break
+        img_read = img_read + 1
         im_path = os.path.join(im_dir, fn)
         fn_ref = fn[:4]+'.png'
         ref_path = os.path.join(ref_dir, fn_ref)
@@ -167,9 +167,9 @@ if __name__ == '__main__':
     avg_psnr = sum_psnr/img_read
     avg_ssim = sum_ssim/img_read
 
-    print('%d images are tested.\n', img_read-1)
-    print('The average PSNR value is %0.4f.\n', avg_psnr)
-    print('The average SSIM value is %0.4f.\n', avg_ssim)
+    print('%d images are tested' % img_read)
+    print('The average PSNR value is %0.4f' % avg_psnr)
+    print('The average SSIM value is %0.4f' % avg_ssim)
 
     cv2.imshow('Original Image', img)
     cv2.imshow('Recovered Image', recovered_img)

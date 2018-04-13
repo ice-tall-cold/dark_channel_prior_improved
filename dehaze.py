@@ -16,8 +16,8 @@ from skimage.measure import compare_ssim as ssim
 PATCH_SIZE = 15
 HAZE_WEIGHT = 0.95
 BRIGHTEST_PIXELS_PERCENTAGE = 0.001
-IMG_START = 1
-IMG_END = 2
+IMG_START = 19
+IMG_END = 20
 
 
 def dark_channel(input_img, patch_size):
@@ -137,12 +137,17 @@ if __name__ == '__main__':
     img = 0
     ref_img = 0
     recovered_img = 0
+    img_read=0
+    img_index=1
 
     for fn in os.listdir(im_dir):
-        if img_read+1 < IMG_START:
+        assert(IMG_START < IMG_END),'Image start index should be smaller than end index'
+        if img_index < IMG_START:
+            img_index=img_index+1
             continue
-        if img_read+1 >= IMG_END:
+        if img_index >= IMG_END:
             break
+        img_index=img_index+1
         img_read = img_read + 1
         im_path = os.path.join(im_dir, fn)
         fn_ref = fn[:4]+'.png'

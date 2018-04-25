@@ -5,19 +5,142 @@ import math
 import numpy as np
 from skimage.measure import compare_ssim as ssim
 
-IMG_START = 1
-IMG_END = 450
-IMG_START_test = 450
-IMG_END_test = 500
+PATCH_SIZE = 3
+HAZE_WEIGHT = 0.95
+BRIGHTEST_PIXELS_PERCENTAGE = 0.001
 
+FOLDS = 5
+
+METHOD = 1  # 1: learning method; 2: DCP
+
+
+# learning method start here
 def sigmoid(z):
     s = 1 / (1 + np.exp(-z))
     return s
 
+
 def sigmoid_prime(z):
     s = sigmoid(z) * (1 - sigmoid(z))
-    return s 
+    return s
 
+
+def propagate(w, b, x, y, learning_rate):
+    m, n = x.shape[0], x.shape[1]
+
+    # Forward propagation
+    a0 = (np.multiply(w[0], x[:, :, 0]) + b[0])
+    a1 = (np.multiply(w[1], x[:, :, 1]) + b[1])
+    a2 = (np.multiply(w[2], x[:, :, 2]) + b[2])
+    # cost = (np.sum(np.multiply(Y[:,:,0],np.log(A0)) + np.multiply((np.ones((m,n)) - Y[:,:,0]), np.log(np.ones((m,n)) - A0)))+
+    #      np.sum(np.multiply(Y[:,:,1],np.log(A1)) + np.multiply((np.ones((m,n)) - Y[:,:,1]), np.log(np.ones((m,n)) - A1)))+
+    #       np.sum(np.multiply(Y[:,:,2],np.log(A2)) + np.multiply((np.ones((m,n)) - Y[:,:,2]), np.log(np.ones((m,n)) - A2))))*(-1/(m*n*3))
+
+    # Backward propagation
+    dw0 = np.sum(np.multiply((x[:, :, 0]), (a0 - y[:, :, 0])), dtype=np.float64) / (m * n)
+    dw1 = np.sum(np.multiply((x[:, :, 1]), (a1 - y[:, :, 1])), dtype=np.float64) / (m * n)
+    dw2 = np.sum(np.multiply((x[:, :, 2]), (a2 - y[:, :, 2])), dtype=np.float64) / (m * n)
+    # dw0 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[0], X[:,:,0])), (A0 - Y[:,:,0])), dtype = np.float64)/(m*n)
+    # dw1 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[1], X[:,:,1])), (A0 - Y[:,:,1])), dtype = np.float64)/(m*n)
+    # dw2 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[2], X[:,:,2])), (A0 - Y[:,:,2])), dtype = np.float64)/(m*n)
+    db0 = np.sum(a0 - y[:, :, 0], dtype=np.float64) / (m * n)
+    db1 = np.sum(a1 - y[:, :, 1], dtype=np.float64) / (m * n)
+    db2 = np.sum(a2 - y[:, :, 2], dtype=np.float64) / (m * n)
+
+    # cost = np.squeeze(cost)
+    dw = [dw0, dw1, dw2]
+    db = [db0, db1, db2]
+    w -= np.multiply(learning_rate, dw)
+    b -= np.multiply(learning_rate, db)
+
+    return w, b
+
+
+# DCP starts here
+def dark_channel(input_img, patch_size):
+    b, g, r = cv2.split(input_img)
+    dc = cv2.min(cv2.min(r, g), b)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (patch_size, patch_size))
+    dcp = cv2.erode(dc, kernel)
+    return dcp
+
+
+def atm_light(img, dcp):
+    [h, w] = img.shape[:2]
+    img_size = h*w
+    num_pixel = int(max(math.floor(img_size*BRIGHTEST_PIXELS_PERCENTAGE), 1))
+    dark_channel_vec = dcp.reshape(img_size)
+    img_vec = img.reshape(img_size, 3)
+
+    indices = dark_channel_vec.argsort()
+    indices = indices[img_size-num_pixel::]
+
+# highest intensity in the input image I are selected as the atmospheric light.
+    brightest_pixel = img_vec[indices]
+    brightest_r = brightest_pixel[:, 0]
+    brightest_g = brightest_pixel[:, 1]
+    brightest_b = brightest_pixel[:, 2]
+    a = np.zeros(3)
+    a[0] = max(brightest_r)
+    a[1] = max(brightest_g)
+    a[2] = max(brightest_b)
+
+# average form of a
+#    atm_sum = np.zeros(3)
+#    for ind in range(1, num_pixel):
+#       atm_sum = atm_sum + img_vec[indices[ind]]
+#    a = atm_sum / num_pixel
+
+    return a
+
+
+def transmission_estimate(im, a, sz):
+    im3 = np.empty(im.shape, im.dtype)
+
+    for ind in range(0, 3):
+        im3[:, :, ind] = im[:, :, ind]/a[ind]
+
+    transmission = 1 - HAZE_WEIGHT*dark_channel(im3, sz)
+    return transmission
+
+
+def guided_filter(im, p, r, eps):
+    mean_i = cv2.boxFilter(im, cv2.CV_64F, (r, r))
+    mean_p = cv2.boxFilter(p, cv2.CV_64F, (r, r))
+    mean_ip = cv2.boxFilter(im*p, cv2.CV_64F, (r, r))
+    cov_ip = mean_ip - mean_i*mean_p
+
+    mean_ii = cv2.boxFilter(im*im, cv2.CV_64F, (r, r))
+    var_i = mean_ii - mean_i*mean_i
+
+    a = cov_ip/(var_i + eps)
+    b = mean_p - a*mean_i
+
+    mean_a = cv2.boxFilter(a, cv2.CV_64F, (r, r))
+    mean_b = cv2.boxFilter(b, cv2.CV_64F, (r, r))
+
+    q = mean_a*im + mean_b
+    return q
+
+
+def transmission_refine(im, estimate_t):
+    gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    gray = np.float64(gray)/255
+    r = 60
+    eps = 0.0001
+    t = guided_filter(gray, estimate_t, r, eps)
+    return t
+
+
+def recover(im, t_estimate, a, t_bound=0.1):
+    res = np.empty(im.shape, im.dtype)
+
+    for ind in range(0, 3):
+        res[:, :, ind] = (im[:, :, ind]-a[ind])/cv2.max(t_estimate, t_bound) + a[ind]
+    return res
+
+
+# Evaluating methods
 def psnr(original_img, recovered_img):
     [h, w] = original_img.shape[:2]
     img_size = h * w
@@ -26,110 +149,133 @@ def psnr(original_img, recovered_img):
     psnr_all_channel = 0
     for i in range(0, 3):
         diff = original_img_vec[:, i] - recovered_img_vec[:, i]
-        psnr_single_channel = 20 * math.log10(1/np.std(diff))
-        psnr_all_channel = psnr_all_channel+psnr_single_channel
-    return psnr_all_channel/3
+        psnr_single_channel = 20 * math.log10(1 / np.std(diff))
+        psnr_all_channel = psnr_all_channel + psnr_single_channel
+    return psnr_all_channel / 3
 
-def propagate(w, b, X, Y, learning_rate):
-    m, n  = X.shape[0], X.shape[1]
-    
-    #Forward propagation
-    A0 = (np.multiply(w[0], X[:,:,0]) + b[0])
-    A1 = (np.multiply(w[1], X[:,:,1]) + b[1])
-    A2 = (np.multiply(w[2], X[:,:,2]) + b[2])
-    #cost = (np.sum(np.multiply(Y[:,:,0],np.log(A0)) + np.multiply((np.ones((m,n)) - Y[:,:,0]), np.log(np.ones((m,n)) - A0)))+
-    #      np.sum(np.multiply(Y[:,:,1],np.log(A1)) + np.multiply((np.ones((m,n)) - Y[:,:,1]), np.log(np.ones((m,n)) - A1)))+
-    #       np.sum(np.multiply(Y[:,:,2],np.log(A2)) + np.multiply((np.ones((m,n)) - Y[:,:,2]), np.log(np.ones((m,n)) - A2))))*(-1/(m*n*3))
-    
-    #Backward propagation
-    dw0 = np.sum(np.multiply((X[:,:,0]), (A0 - Y[:,:,0])), dtype = np.float64)/(m*n)
-    dw1 = np.sum(np.multiply((X[:,:,1]), (A1 - Y[:,:,1])), dtype = np.float64)/(m*n)
-    dw2 = np.sum(np.multiply((X[:,:,2]), (A2 - Y[:,:,2])), dtype = np.float64)/(m*n)
-    #dw0 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[0], X[:,:,0])), (A0 - Y[:,:,0])), dtype = np.float64)/(m*n)
-    #dw1 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[1], X[:,:,1])), (A0 - Y[:,:,1])), dtype = np.float64)/(m*n)
-    #dw2 = np.sum(np.multiply(sigmoid_prime(np.multiply(w[2], X[:,:,2])), (A0 - Y[:,:,2])), dtype = np.float64)/(m*n)
-    db0 = np.sum(A0 - Y[:,:,0], dtype = np.float64)/(m*n)
-    db1 = np.sum(A1 - Y[:,:,1], dtype = np.float64)/(m*n)
-    db2 = np.sum(A2 - Y[:,:,2], dtype = np.float64)/(m*n)
-    
-    #cost = np.squeeze(cost)
-    dw = [dw0, dw1, dw2]
-    db = [db0, db1, db2]
-    w = w - np.multiply(learning_rate, dw)
-    b = b - np.multiply(learning_rate, db)
-    
-    return w, b
+
+# Main stream starts here
+# Training method
+def train_method(imgs, refs):
+    samples_per_fold = int(len(imgs) / FOLDS)
+
+    ssim_folds = []
+    psnr_folds = []
+    test_num = 0
+
+    for i in range(FOLDS):
+        print('start at fold %d' % i)
+        test_range_up = (i + 1) * samples_per_fold
+        test_range_down = i * samples_per_fold
+
+        # training phase
+        w = [0, 0, 0]
+        b = [0, 0, 0]
+        sum_ssim = 0
+        sum_psnr = 0
+        for j in range(len(imgs)):
+            if (j < test_range_down) or (j >= test_range_up):
+                w, b = propagate(w, b, imgs[j], refs[j], learning_rate=0.7)
+
+        # testing phase
+        for j in range(len(imgs)):
+            if (j >= test_range_down) and (j < test_range_up):
+                img_test = imgs[j]
+                ref_img = refs[j]
+                a0 = np.multiply(w[0], img_test[:, :, 0]) + b[0]
+                a1 = np.multiply(w[1], img_test[:, :, 1]) + b[1]
+                a2 = np.multiply(w[2], img_test[:, :, 2]) + b[2]
+                image_recovered = np.zeros(img_test.shape)
+                image_recovered[:, :, 0] = a0
+                image_recovered[:, :, 1] = a1
+                image_recovered[:, :, 2] = a2
+                ssim_val = ssim(image_recovered, ref_img, multichannel=True)
+                psnr_val = psnr(image_recovered, ref_img)
+                sum_ssim = sum_ssim + ssim_val
+                sum_psnr = sum_psnr + psnr_val
+                test_num += 1
+
+        ssim_folds.append(sum_ssim)
+        psnr_folds.append(sum_psnr)
+
+    avg_psnr = sum(psnr_folds) / test_num
+    avg_ssim = sum(ssim_folds) / test_num
+
+    print('%d images are tested.\n' % test_num)
+
+    return avg_psnr, avg_ssim
+
+
+# DCP:
+def dcp_method(imgs, refs, srcs):
+    test_num = 0
+    sum_ssim = 0
+    sum_psnr = 0
+    for j in range(len(imgs)):
+        img = imgs[j]
+        ref_img = refs[j]
+        src = srcs[j]
+        dark = dark_channel(img, PATCH_SIZE)
+        a = atm_light(img, dark)
+        t_estimated = transmission_estimate(img, a, PATCH_SIZE)
+        t_refined = transmission_refine(src, t_estimated)
+        recovered_img = recover(img, t_refined, a, 0.1)
+        ssim_val = ssim(recovered_img, ref_img, multichannel=True)
+        psnr_val = psnr(recovered_img, ref_img)
+        sum_ssim = sum_ssim + ssim_val
+        sum_psnr = sum_psnr + psnr_val
+        test_num += 1
+
+    avg_psnr = sum_ssim / test_num
+    avg_ssim = sum_psnr / test_num
+
+    print('%d images are tested.\n' % test_num)
+
+    return avg_psnr, avg_ssim
+
 
 if __name__ == '__main__':
-    data_dir = 'images'
+    data_dir = 'SOTS'
     in_or_out = 'outdoor'
     im_dir = os.path.join(data_dir, in_or_out, 'hazy')
     ref_dir = os.path.join(data_dir, in_or_out, 'gt')
-    
+
     if not os.path.isdir(im_dir):
-        print ('Given path {} not found', format(im_dir))
+        print ('Given path %s not found' % format(im_dir))
         sys.exit(-1)
-    
-    img_read = 0
-    w = [0, 0, 0]
-    b = [0, 0, 0]
-    
+
+    if not os.path.isdir(ref_dir):
+        print ('Given path %s not found' % format(ref_dir))
+        sys.exit(-1)
+
+    img_all = []
+    ref_img_all = []
+    src_all = []
+    ref_src_all = []
+
     for fn in os.listdir(im_dir):
-        img_read = img_read + 1
-        if img_read < IMG_START:
-            continue
-        if img_read >= IMG_END:
-            break
         im_path = os.path.join(im_dir, fn)
-        fn_ref = fn[:4] +'.png'
+        fn_ref = fn[:4] + '.png'
         ref_path = os.path.join(ref_dir, fn_ref)
-        assert(os.path.exists(im_path)), 'Annotation: {} does not exist'.format(im_path)
-        assert(os.path.exists(ref_path)),'Annotation: {} does not exist'.format(ref_path)
+        assert (os.path.exists(im_path)), 'Annotation: %s does not exist' % format(im_path)
+        assert (os.path.exists(ref_path)), 'Annotation: %s does not exist' % format(ref_path)
         ref_src = cv2.imread(ref_path)
-        ref_img = ref_src.astype('float64')/255
+        ref_img = ref_src.astype('float64') / 255
         src = cv2.imread(im_path)
-        img = src.astype('float64')/255
+        img = src.astype('float64') / 255
+        img_all.append(img)
+        ref_img_all.append(ref_img)
+        src_all.append(src)
+        ref_src_all.append(ref_src)
 
-        w, b = propagate(w, b, img, ref_img, learning_rate = 0.7)
+    print('%d images are loaded.' % len(img_all))
 
-    img_read_test = 0
-    sum_ssim = 0
-    sum_psnr = 0
+    if METHOD == 1:
+        psnr_mean, ssim_mean = train_method(img_all, ref_img_all)
+    elif METHOD == 2:
+        psnr_mean, ssim_mean = dcp_method(img_all, ref_img_all, src_all)
+    else:
+        assert()
 
-    for x in os.listdir(im_dir):
-        img_read_test = img_read_test + 1
-        if img_read_test < IMG_START_test:
-            continue 
-        if img_read_test >= IMG_END_test:
-            break
-        im_path_test = os.path.join(im_dir, x)
-        x_ref = x[:4] + '.png'
-        ref_path_test = os.path.join(ref_dir, x_ref)
-        assert(os.path.exists(im_path_test)), 'Annotation: {} does not exist'.format(im_path)
-        assert(os.path.exists(ref_path_test)), 'Annotation: {} does not exist'.format(ref_path)
-        ref_src_test = cv2.imread(ref_path_test)
-        ref_img_test = ref_src_test.astype('float64')/255
-        src_test = cv2.imread(im_path_test)
-        img_test = src_test.astype('float64')/255
-
-        A0 = np.multiply(w[0], img_test[:,:,0]) + b[0]
-        A1 = np.multiply(w[1], img_test[:,:,1]) + b[1]
-        A2 = np.multiply(w[2], img_test[:,:,2]) + b[2]
-        image_recovered = np.zeros(img_test.shape)
-        image_recovered[:,:,0] = A0
-        image_recovered[:,:,1] = A1
-        image_recovered[:,:,2] = A2
-        ssim_val = ssim(image_recovered, ref_img_test, multichannel=True)
-        psnr_val = psnr(image_recovered, ref_img_test)
-        sum_ssim = sum_ssim + ssim_val
-        sum_psnr = sum_psnr + psnr_val
-
-    avg_psnr = sum_psnr/(IMG_END_test - IMG_START_test)
-    avg_ssim = sum_ssim/(IMG_END_test - IMG_START_test)
-
-    #print (image_recovered)
-    print('%d images are tested.\n', IMG_END_test - IMG_START_test)
-    #print('The last SSIM value is %0.4f.\n', ssim_val)
-    #print('The last PSNR value is %0.4f.\n', psnr_val)
-    print('The average PSNR value is %0.4f.\n', avg_psnr)
-    print('The average SSIM value is %0.4f.\n', avg_ssim)
+    print('The average PSNR value is %0.4f.\n' % psnr_mean)
+    print('The average SSIM value is %0.4f.\n' % ssim_mean)

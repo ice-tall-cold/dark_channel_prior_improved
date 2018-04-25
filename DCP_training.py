@@ -4,14 +4,16 @@ import cv2
 import math
 import numpy as np
 from skimage.measure import compare_ssim as ssim
+from skimage.measure import compare_psnr as psnr
 
 PATCH_SIZE = 3
 HAZE_WEIGHT = 0.95
 BRIGHTEST_PIXELS_PERCENTAGE = 0.001
+PIXEL_MAX = 255.0
 
 FOLDS = 5
 
-METHOD = 1  # 1: learning method; 2: DCP
+METHOD = 2  # 1: learning method; 2: DCP
 
 
 # learning method start here
@@ -140,20 +142,6 @@ def recover(im, t_estimate, a, t_bound=0.1):
     return res
 
 
-# Evaluating methods
-def psnr(original_img, recovered_img):
-    [h, w] = original_img.shape[:2]
-    img_size = h * w
-    original_img_vec = original_img.reshape(img_size, 3)
-    recovered_img_vec = recovered_img.reshape(img_size, 3)
-    psnr_all_channel = 0
-    for i in range(0, 3):
-        diff = original_img_vec[:, i] - recovered_img_vec[:, i]
-        psnr_single_channel = 20 * math.log10(1 / np.std(diff))
-        psnr_all_channel = psnr_all_channel + psnr_single_channel
-    return psnr_all_channel / 3
-
-
 # Main stream starts here
 # Training method
 def train_method(imgs, refs):
@@ -189,8 +177,8 @@ def train_method(imgs, refs):
                 image_recovered[:, :, 0] = a0
                 image_recovered[:, :, 1] = a1
                 image_recovered[:, :, 2] = a2
-                ssim_val = ssim(image_recovered, ref_img, multichannel=True)
-                psnr_val = psnr(image_recovered, ref_img)
+                ssim_val = ssim(ref_img, image_recovered, multichannel=True)
+                psnr_val = psnr(ref_img, image_recovered)
                 sum_ssim = sum_ssim + ssim_val
                 sum_psnr = sum_psnr + psnr_val
                 test_num += 1
@@ -220,14 +208,14 @@ def dcp_method(imgs, refs, srcs):
         t_estimated = transmission_estimate(img, a, PATCH_SIZE)
         t_refined = transmission_refine(src, t_estimated)
         recovered_img = recover(img, t_refined, a, 0.1)
-        ssim_val = ssim(recovered_img, ref_img, multichannel=True)
-        psnr_val = psnr(recovered_img, ref_img)
+        ssim_val = ssim(ref_img, recovered_img, multichannel=True)
+        psnr_val = psnr(ref_img, recovered_img)
         sum_ssim = sum_ssim + ssim_val
         sum_psnr = sum_psnr + psnr_val
         test_num += 1
 
-    avg_psnr = sum_ssim / test_num
-    avg_ssim = sum_psnr / test_num
+    avg_psnr = sum_psnr / test_num
+    avg_ssim = sum_ssim / test_num
 
     print('%d images are tested.\n' % test_num)
 
@@ -271,8 +259,10 @@ if __name__ == '__main__':
     print('%d images are loaded.' % len(img_all))
 
     if METHOD == 1:
+        print('dehaze using learning method')
         psnr_mean, ssim_mean = train_method(img_all, ref_img_all)
     elif METHOD == 2:
+        print('dehaze using DCP')
         psnr_mean, ssim_mean = dcp_method(img_all, ref_img_all, src_all)
     else:
         assert()

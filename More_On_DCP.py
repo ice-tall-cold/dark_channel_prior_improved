@@ -10,7 +10,7 @@ from skimage.measure import compare_psnr as psnr
 # Parameters defined here
 LARGE_PATCH_SIZE = 15
 SMALL_PATCH_SIZE = 3
-HAZE_WEIGHT = 0.8
+HAZE_WEIGHT = 0.9
 BRIGHTEST_PIXELS_PERCENTAGE = 0.001
 PIXEL_MAX = 255.0
 
@@ -24,7 +24,7 @@ GUIDED_FILTER = 1
 ENABLE_PRINT_FINAL_IMAGE = 0
 
 
-METHOD = 1  # 1: DCP # 2: test
+METHOD = 3  # 1: DCP; 2: test; 3: DCP Weight test
 
 FOLDS = 5
 
@@ -161,13 +161,19 @@ def sub_block_value(block):
     return block_sum / 3
 
 
-def transmission_estimate(im, a, sky):
+def transmission_estimate(im, a, sky, weight):
     im3 = np.empty(im.shape, im.dtype)
 
     for ind in range(3):
         im3[:, :, ind] = im[:, :, ind]/a[ind]
 
-    transmission = 1 - HAZE_WEIGHT*dark_channel_prior(im3, sky)
+    if weight is None:
+        transmission = 1 - HAZE_WEIGHT*dark_channel_prior(im3, sky)
+    else:
+        transmission_sky = 1 - weight[0] * dark_channel_prior(im3, sky)
+        transmission_non_sky = 1 - weight[0] * dark_channel_prior(im3, sky)
+        transmission = transmission_sky
+        transmission[sky == 0] = transmission_non_sky[sky == 0]
     return transmission
 
 
@@ -208,7 +214,7 @@ def recover(im, t_estimate, a, sky):
         res_sky = np.empty(im.shape, im.dtype)
         res_non_sky = np.empty(im.shape, im.dtype)
         for ind in range(0, 3):
-            res_sky[:, :, ind] = (im[:, :, ind]-a[ind])/t_estimate + a[ind]
+            res_sky[:, :, ind] = (im[:, :, ind]-a[ind])/cv2.max(t_estimate, t_bound_down) + a[ind]
             res_non_sky[:, :, ind] = (im[:, :, ind] - a[ind]) / \
                              cv2.min(cv2.max(t_estimate, t_bound_down), t_bound_up) + a[ind]
         res[sky > 0] = res_sky[sky > 0]
@@ -259,7 +265,7 @@ def dcp_dehaze(dcp_img, weight):
         [h, w] = dcp_img.shape[:2]
         sky = np.zeros([h, w])
     a = atm_light(dcp_img, sky)
-    t_estimated = transmission_estimate(dcp_img, a, sky)
+    t_estimated = transmission_estimate(dcp_img, a, sky, weight)
     if GUIDED_FILTER == 1:
         t_refined = transmission_refine(dcp_img, t_estimated)
     else:
@@ -275,7 +281,7 @@ def dcp_method(dcp_imgs, dcp_refs, files):
     test_num = 0
     for j in range(len(dcp_imgs)):
         print('in process file: %s' % files[j])
-        recovered_img = dcp_dehaze(dcp_imgs[j], HAZE_WEIGHT)
+        recovered_img = dcp_dehaze(dcp_imgs[j], None)
         dcp_ref_img = dcp_refs[j]
         ssim_val = ssim(dcp_ref_img, recovered_img, data_range=255, multichannel=True)
         psnr_val = psnr(dcp_ref_img, recovered_img, data_range=255)
@@ -287,43 +293,37 @@ def dcp_method(dcp_imgs, dcp_refs, files):
     return dcp_psnrs, dcp_ssims, re_imgs
 
 
-def dcp_test(dcp_imgs, dcp_refs, files):
+def dcp_test(dcp_imgs, dcp_refs):
     dcp_ssims = []
     dcp_psnrs = []
-    re_imgs = []
-    test_num = 0
-    for j in range(len(dcp_imgs)):
-        print('in process file: %s' % files[j])
-        recovered_img = dcp_dehaze(dcp_imgs[j], HAZE_WEIGHT)
-        dcp_ref_img = dcp_refs[j]
-        ssim_val = ssim(dcp_ref_img, recovered_img, data_range=255, multichannel=True)
-        psnr_val = psnr(dcp_ref_img, recovered_img, data_range=255)
-        dcp_ssims.append(ssim_val)
-        dcp_psnrs.append(psnr_val)
-        re_imgs.append(recovered_img)
-        test_num += 1
-    print('%d images are tested.\n' % test_num)
-    return dcp_psnrs, dcp_ssims, re_imgs
-
-
-def test_weight(dcp_imgs, dcp_refs, dcp_srcs, files):
-    test_num = 0
-    sum_ssim = 0
-    sum_psnr = 0
-    for j in range(len(dcp_imgs)):
-        print('in process file: %s' % files[j])
-        recovered_img = dcp_dehaze(dcp_imgs[j], HAZE_WEIGHT)
-        dcp_ref_img = dcp_refs[j]
-        ssim_val = ssim(dcp_ref_img, recovered_img, data_range=255, multichannel=True)
-        psnr_val = psnr(dcp_ref_img, recovered_img, data_range=255)
-        sum_ssim = sum_ssim + ssim_val
-        sum_psnr = sum_psnr + psnr_val
-        test_num += 1
-        if j == len(dcp_imgs)-1:
-            avg_psnr = sum_psnr / test_num
-            avg_ssim = sum_ssim / test_num
-            print('%d images are tested.\n' % test_num)
-            return avg_psnr, avg_ssim, dcp_imgs[j], recovered_img, dcp_ref_img
+    dcp_weights_psnrs = []
+    dcp_weights_ssims = []
+    for dj in range(len(dcp_imgs)):
+        print("test images at %d" % dj)
+        ssims_per_weight = []
+        psnrs_per_weight = []
+        for di in range(100):
+            weights = [0.5 + int(di / 10) * 0.05, 0.5 + (di % 10) * 0.05]
+            recovered_img = dcp_dehaze(dcp_imgs[dj], weights)
+            dcp_ref_img = dcp_refs[dj]
+            ssim_val = ssim(dcp_ref_img, recovered_img, data_range=255, multichannel=True)
+            psnr_val = psnr(dcp_ref_img, recovered_img, data_range=255)
+            ssims_per_weight.append(ssim_val)
+            psnrs_per_weight.append(psnr_val)
+        dcp_ssims.append(np.max(ssims_per_weight))
+        dcp_psnrs.append(np.max(psnrs_per_weight))
+        index = np.argmax(psnrs_per_weight)
+        dcp_weights_psnrs.append(weights[index])
+        index = np.argmax(ssims_per_weight)
+        dcp_weights_ssims.append(weights[index])
+    file_weight = open('results.txt', 'w+')
+    for j_weight in range(len(dcp_ssims)):
+        file_weight.write("%f\t" % dcp_psnrs[j_weight])
+        file_weight.write("%f\t" % dcp_ssims[j_weight])
+        file_weight.write("%f\t" % dcp_weights_psnrs[j_weight])
+        file_weight.write("%f\n" % dcp_weights_ssims[j_weight])
+    file_result.close()
+    return
 
 
 def test_sky(im):
@@ -369,7 +369,7 @@ if __name__ == '__main__':
         img_all.append(img)
         ref_img_all.append(ref_img)
         file_names.append(fn_ref)
-
+        break
     print('%d images are loaded.' % len(img_all))
 
     if METHOD == 1:
@@ -396,5 +396,7 @@ if __name__ == '__main__':
             cv2.imshow('Reference Image', ref_img_all[0])
             cv2.waitKey(0)
             cv2.destroyAllWindows()
+    elif METHOD == 3:
+        dcp_test(img_all, ref_img_all)
     else:
         assert()

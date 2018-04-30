@@ -339,17 +339,16 @@ def propagate(w1, w2, w3, b, x, y, t_refined, a_light, learning_rate):
 # Main stream starts here
 # DCP:
 def dcp_dehaze(dcp_img, weight):
+    [h, w] = dcp_img.shape[:2]
     if DETECT_SKY == 1:
         dcp_bopt, sky_detected = Sky_Detection.detect_sky(np.array(dcp_img, dtype=np.uint8))
         if sky_detected is None:
-            [h, w] = dcp_img.shape[:2]
             sky = np.zeros([h, w])
         else:
             sky = sky_detected[:, :, 2]
             sky[sky != 255] = 1
             sky[sky == 255] = 0
     else:
-        [h, w] = dcp_img.shape[:2]
         sky = np.zeros([h, w])
     a = atm_light(dcp_img, sky)
     t_estimated = transmission_estimate(dcp_img, a, sky, weight)

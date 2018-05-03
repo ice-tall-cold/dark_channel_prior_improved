@@ -11,13 +11,14 @@ import cv2
 import numpy as np
 import Sky_Detection
 import DCP
+import logging
 import Training_Method as TM
 from skimage.measure import compare_ssim as ssim
 from skimage.measure import compare_psnr as psnr
 
 
 # Function define here
-DETECT_SKY = 1
+DETECT_SKY = 0
 RECOVER_WHITENING = 1
 BRIGHTEST_IN_DC = 1
 GUIDED_FILTER = 1
@@ -52,12 +53,12 @@ def dcp_dehaze(dcp_img, sky):
     return recovered_img
 
 
-def train_method(train_imgs, train_refs, train_in):
+def train_method(train_imgs, train_refs):
     train_skys = []
     count = 0
     for im_in in train_imgs:
         count += 1
-        train_in.write("sky segmentation at %d" % count)
+        logging.info("sky segmentation at %d" % count)
         [h, w] = im_in.shape[:2]
         if DETECT_SKY == 1:
             dcp_bopt, sky_detected = Sky_Detection.detect_sky(np.array(im_in, dtype=np.uint8))
@@ -78,7 +79,7 @@ def train_method(train_imgs, train_refs, train_in):
     test_recovered_imgs = []
 
     for fold_i in range(FOLDS):
-        print('start at fold %d' % fold_i)
+        logging.info('start at fold %d' % fold_i)
         test_range_up = (fold_i + 1) * samples_per_fold
         test_range_down = fold_i * samples_per_fold
 
@@ -88,7 +89,7 @@ def train_method(train_imgs, train_refs, train_in):
         w3 = [0, 0, 0]
         b = [0, 0, 0]
         for it in range(ITER_NUM):
-            print('train at iteration %d' % it)
+            logging.info('train at iteration %d' % it)
             for train_j in range(len(train_imgs)):
                 if (train_j < test_range_down) or (train_j >= test_range_up):
                     train_img = train_imgs[train_j]
@@ -154,17 +155,17 @@ def train_method(train_imgs, train_refs, train_in):
                 test_recovered_imgs.append(image_recovered)
                 test_num += 1
 
-    print('%d images are tested.\n' % test_num)
+    logging.info('%d images are tested.\n' % test_num)
 
     return psnr_folds, ssim_folds, test_recovered_imgs
 
 
-def dcp_method(dcp_imgs, dcp_refs, files, file_in):
+def dcp_method(dcp_imgs, dcp_refs, files):
     count = 0
     skys = []
     for im_in in dcp_imgs:
         count += 1
-        file_in.write("sky segmentation at %d" % count)
+        logging.info("sky segmentation at %d" % count)
         [h, w] = im_in.shape[:2]
         if DETECT_SKY == 1:
             dcp_bopt, sky_detected = Sky_Detection.detect_sky(np.array(im_in, dtype=np.uint8))
@@ -177,25 +178,25 @@ def dcp_method(dcp_imgs, dcp_refs, files, file_in):
         else:
             sky = np.zeros([h, w])
         skys.append(sky)
-    file_in.write('sky processed')
+    logging.info('sky processed')
     dcp_ssims = []
     dcp_psnrs = []
     re_imgs = []
     test_num = 0
 
     for d_j in range(len(dcp_imgs)):
-        file_in.write('in process file: %s' % files[d_j])
+        logging.info('in process file: %s' % files[d_j])
         recovered_img = dcp_dehaze(dcp_imgs[d_j], skys[d_j])
         dcp_ref_img = dcp_refs[d_j]
         ssim_val = ssim(dcp_ref_img, recovered_img, data_range=255, multichannel=True)
         psnr_val = psnr(dcp_ref_img, recovered_img, data_range=255)
         dcp_ssims.append(ssim_val)
         dcp_psnrs.append(psnr_val)
-        file_in.write('SSIM: %f' % ssim_val)
-        file_in.write('PSNR: %f' % psnr_val)
+        logging.info('SSIM: %f' % ssim_val)
+        logging.info('PSNR: %f' % psnr_val)
         re_imgs.append(recovered_img)
         test_num += 1
-    file_in.write('%d images are tested.\n' % test_num)
+    logging.info('%d images are tested.\n' % test_num)
     return dcp_psnrs, dcp_ssims, re_imgs
 
 
@@ -211,7 +212,7 @@ def sky_segmentation_test(ims):
 
 
 if __name__ == '__main__':
-    file_log = open('log.txt', 'w+')
+    logging.basicConfig(filename='main.log', level=logging.DEBUG)
     data_dir = 'SOTS'
     in_door = 'indoor'
     out_door = 'outdoor'
@@ -229,16 +230,16 @@ if __name__ == '__main__':
     if not os.path.exists(result_sky_dir):
         os.makedirs(result_sky_dir)
     if not os.path.isdir(im_dir_in):
-        file_log.write('Given path %s not found' % format(im_dir_in))
+        logging.error('Given path %s not found' % format(im_dir_in))
         sys.exit(-1)
     if not os.path.isdir(im_dir_out):
-        file_log.write('Given path %s not found' % format(im_dir_out))
+        logging.error('Given path %s not found' % format(im_dir_out))
         sys.exit(-1)
     if not os.path.isdir(ref_dir_in):
-        file_log.write('Given path %s not found' % format(ref_dir_in))
+        logging.error('Given path %s not found' % format(ref_dir_in))
         sys.exit(-1)
     if not os.path.isdir(ref_dir_out):
-        file_log.write('Given path %s not found' % format(ref_dir_out))
+        logging.error('Given path %s not found' % format(ref_dir_out))
         sys.exit(-1)
 
     img_all = []
@@ -271,13 +272,13 @@ if __name__ == '__main__':
         img_all.append(img)
         ref_img_all.append(ref_img)
         file_names.append(fn_ref)
-    file_log.write('%d images are loaded.' % len(img_all))
+    logging.info('%d images are loaded.' % len(img_all))
 
     if METHOD == 1:
-        file_log.write('dehaze using DCP')
-        psnrs, ssims, recovered_imgs = dcp_method(img_all, ref_img_all, file_names, file_log)
-        file_log.write('The average PSNR value is %0.4f.\n' % np.mean(psnrs))
-        file_log.write('The average SSIM value is %0.4f.\n' % np.mean(ssims))
+        logging.info('dehaze using DCP')
+        psnrs, ssims, recovered_imgs = dcp_method(img_all, ref_img_all, file_names)
+        logging.info('The average PSNR value is %0.4f.\n' % np.mean(psnrs))
+        logging.info('The average SSIM value is %0.4f.\n' % np.mean(ssims))
         if ENABLE_PRINT_FINAL_IMAGE > 0:
             for i in range(len(recovered_imgs)):
                 cv2.imwrite(os.path.join(result_dcp_dir, file_names[i]), recovered_imgs[i])
@@ -288,10 +289,10 @@ if __name__ == '__main__':
                 file_result.write("%f\n" % ssims[j])
             file_result.close()
     elif METHOD == 2:
-        file_log.write('dehaze using Train method')
-        psnrs, ssims, recovered_imgs = train_method(img_all, ref_img_all, file_log)
-        file_log.write('The average PSNR value is %0.4f.\n' % np.mean(psnrs))
-        file_log.write('The average SSIM value is %0.4f.\n' % np.mean(ssims))
+        logging.info('dehaze using Train method')
+        psnrs, ssims, recovered_imgs = train_method(img_all, ref_img_all)
+        logging.info('The average PSNR value is %0.4f.\n' % np.mean(psnrs))
+        logging.info('The average SSIM value is %0.4f.\n' % np.mean(ssims))
         if ENABLE_PRINT_FINAL_IMAGE > 0:
             for i in range(len(recovered_imgs)):
                 cv2.imwrite(os.path.join(result_train_dir, file_names[i]), recovered_imgs[i])
@@ -302,11 +303,10 @@ if __name__ == '__main__':
                 file_result.write("%f\n" % ssims[j])
             file_result.close()
     elif METHOD == 3:
-        file_log.write('show sky segmentation results')
+        logging.info('show sky segmentation results')
         recovered_imgs = sky_segmentation_test(img_all)
         if ENABLE_PRINT_FINAL_IMAGE > 0:
             for i in range(len(recovered_imgs)):
                 cv2.imwrite(os.path.join(result_sky_dir, file_names[i]), recovered_imgs[i])
     else:
         assert()
-    file_log.close()

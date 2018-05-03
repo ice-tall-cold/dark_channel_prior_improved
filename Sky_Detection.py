@@ -184,7 +184,7 @@ def detect_sky(image):
     bopt = calculate_border_optimal(image)
 
     if no_sky_region(bopt, image.shape[0]/30, image.shape[0]/4, 5):
-        print("No sky detected")
+#       print("No sky detected")
         return None, None
 
     if partial_sky_region(bopt, image.shape[1]/3):

@@ -27,7 +27,7 @@ ENABLE_PRINT_FINAL_IMAGE = 1
 
 METHOD = 2  # 1: DCP; 2: Train_Method; 3: Simple SKY_SEGMENTATION test
 
-CROSS_VALIDATION = 1
+CROSS_VALIDATION = 0
 FOLDS = 5
 ITER_NUM = 3
 
@@ -362,7 +362,7 @@ if __name__ == '__main__':
             if fn[0] == '.':
                 continue
             im_path = os.path.join(im_dir_ots, fn)
-            fn_ref = fn[:4] + '.png'
+            fn_ref = fn[:4] + '.jpg'
             ref_path = os.path.join(ref_dir_ots, fn_ref)
             assert (os.path.exists(im_path)), 'Annotation: %s does not exist' % format(im_path)
             assert (os.path.exists(ref_path)), 'Annotation: %s does not exist' % format(ref_path)

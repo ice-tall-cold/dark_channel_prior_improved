@@ -6,7 +6,7 @@ import numpy as np
 # Parameters defined here
 LARGE_PATCH_SIZE = 15
 SMALL_PATCH_SIZE = 3
-HAZE_WEIGHT = 0.95
+HAZE_WEIGHT = 0.6
 BRIGHTEST_PIXELS_PERCENTAGE = 0.001
 PIXEL_MAX = 255.0
 

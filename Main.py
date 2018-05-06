@@ -18,18 +18,18 @@ from skimage.measure import compare_psnr as psnr
 
 
 # Function define here
-DETECT_SKY = 0
-RECOVER_WHITENING = 0
+DETECT_SKY = 1
+RECOVER_WHITENING = 1
 BRIGHTEST_IN_DC = 1
 GUIDED_FILTER = 1
-INVERSE_SKY = 0
+INVERSE_SKY = 1
 ENABLE_PRINT_FINAL_IMAGE = 1
 
 METHOD = 2  # 1: DCP; 2: Train_Method; 3: Simple SKY_SEGMENTATION test
 
 CROSS_VALIDATION = 0
 FOLDS = 5
-ITER_NUM = 3
+ITER_NUM = 1
 
 
 # DCP:
@@ -157,6 +157,7 @@ def train_method(test_imgs, test_refs, train_imgs, train_refs, files):
                     psnr_folds.append(psnr_val)
                     logging.info('SSIM: %f' % ssim_val)
                     logging.info('PSNR: %f' % psnr_val)
+                    image_recovered = image_recovered * 255
                     test_recovered_imgs.append(image_recovered)
                     test_num += 1
 
@@ -249,6 +250,7 @@ def train_method(test_imgs, test_refs, train_imgs, train_refs, files):
             psnr_folds.append(psnr_val)
             logging.info('SSIM: %f' % ssim_val)
             logging.info('PSNR: %f' % psnr_val)
+            image_recovered = image_recovered * 255
             test_recovered_imgs.append(image_recovered)
             test_num += 1
 

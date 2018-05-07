@@ -1,6 +1,18 @@
 # Improved dehazed algorithm based on Dark Channel Prior
 
 ## introduction
+
+### Route setting
+directory for training haze images: OTS/haze  
+directory for training groundtruth images: OTS/gt
+directory for testing outdoor haze images: SOTS/outdoor/haze  
+directory for testing outdoor groundtruth images: SOTS/outdoor/gt
+directory for testing indoor haze images: SOTS/indoor/haze  
+directory for testing indoor groundtruth images: SOTS/indoor/gt  
+
+***Please move all the images to required directories before running the code.***
+
+### Define setting
 In the Main.py, functions are defined at the beginning:  
 
 ```

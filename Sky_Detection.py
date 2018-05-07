@@ -1,3 +1,8 @@
+# This sky detection method is downloaded from https://github.com/cnelson/skydetector
+# The algorithm is introduced in Y. Shen and Q. Wang,
+# “Sky region detection in a single im-age for autonomous ground robot navigation”
+# InternationalJournal of Advanced Robotic Systems, vol. 10, no. 10, p. 362,2013
+
 import cv2
 import numpy as np
 from scipy import spatial
@@ -202,4 +207,3 @@ def detect_sky(image):
         result
     )
     return bopt, final
-

@@ -79,3 +79,6 @@ ENABLE_PRINT_FINAL_IMAGE = 1
 
 METHOD = 2  # 1: DCP; 2: Train_Method; 3: Simple SKY_SEGMENTATION test
 ```
+
+## Information
+Authors: Wenrui Zhang & Binghan Li  (TAMU CSCE 633)
